@@ -1,46 +1,33 @@
 import re
-import smtplib
 import dns.resolver
 
-SAFE_MODE = True  # Keeps verification non-intrusive
-
-def is_valid_format(email):
-    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-    return re.match(pattern, email)
-
-def get_mx_record(domain):
-    try:
-        answers = dns.resolver.resolve(domain, 'MX')
-        return str(answers[0].exchange)
-    except Exception:
-        return None
+# Simple regex for email format
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def verify_email(email):
-    if not is_valid_format(email):
-        return False, "❌ Invalid format"
+    # 1. Check format
+    if not EMAIL_REGEX.match(email):
+        return {"email": email, "valid": False, "status": "❌ Invalid format"}
 
     domain = email.split('@')[-1]
-    mx_record = get_mx_record(domain)
-    if not mx_record:
-        return False, "❌ No MX record"
 
+    # 2. Check domain DNS
     try:
-        server = smtplib.SMTP(mx_record, timeout=10)
-        server.ehlo()
-        if SAFE_MODE:
-            server.mail("check@yourdomain.com")
-            code, _ = server.rcpt(email)
-            server.quit()
-            if code in [250, 251]:
-                return True, "✅ Deliverable"
-            else:
-                return False, f"⚠️ Not deliverable ({code})"
-        else:
-            server.quit()
-            return True, "✅ Domain reachable"
-    except smtplib.SMTPServerDisconnected:
-        return False, "⚠️ Disconnected"
-    except smtplib.SMTPConnectError:
-        return False, "⚠️ Cannot connect"
-    except Exception:
-        return False, "⚠️ Unknown error"
+        # Check MX record
+        answers = dns.resolver.resolve(domain, 'MX')
+        if answers:
+            return {"email": email, "valid": True, "status": "✅ MX record found"}
+    except dns.resolver.NXDOMAIN:
+        return {"email": email, "valid": False, "status": "❌ Domain does not exist"}
+    except dns.resolver.NoAnswer:
+        # Try A record as fallback
+        try:
+            dns.resolver.resolve(domain, 'A')
+            return {"email": email, "valid": True, "status": "⚠️ No MX record, but A record found"}
+        except:
+            return {"email": email, "valid": False, "status": "❌ No DNS record found"}
+    except Exception as e:
+        return {"email": email, "valid": False, "status": f"⚠️ Error: {e}"}
+
+    return {"email": email, "valid": False, "status": "❌ Unknown issue"}
+
